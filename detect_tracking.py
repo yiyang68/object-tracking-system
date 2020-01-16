@@ -4,13 +4,64 @@ import cv2
 import os
 import numpy as np
 from imutils.video import VideoStream
+
+def yolo_detection(frame, W, H, net, ln, args):
+    # construct a blob from the input frame and then perform a forward
+    # pass of the YOLO object detector, giving us our bounding boxes
+    # and associated probabilities
+    blob = cv2.dnn.blobFromImage(frame, 1 / 255.0, (416, 416),
+                                 swapRB=True, crop=False)
+    net.setInput(blob)
+    # start = time.time()
+    layerOutputs = net.forward(ln)
+    # end = time.time()
+
+    # initialize our lists of detected bounding boxes, confidences,
+    # and class IDs, respectively
+    boxes = []
+    confidences = []
+    classIDs = []
+
+    # loop over each of the layer outputs
+    for output in layerOutputs:
+        # loop over each of the detections
+        for detection in output:
+            # extract the class ID and confidence (i.e., probability)
+            # of the current object detection
+            scores = detection[5:]
+            classID = np.argmax(scores)
+            confidence = scores[classID]
+
+            # filter out weak predictions by ensuring the detected
+            # probability is greater than the minimum probability
+            if confidence > args["confidence"]:
+                # scale the bounding box coordinates back relative to
+                # the size of the image, keeping in mind that YOLO
+                # actually returns the center (x, y)-coordinates of
+                # the bounding box followed by the boxes' width and
+                # height
+                box = detection[0:4] * np.array([W, H, W, H])
+                (centerX, centerY, width, height) = box.astype("int")
+
+                # use the center (x, y)-coordinates to derive the top
+                # and and left corner of the bounding box
+                x = int(centerX - (width / 2))
+                y = int(centerY - (height / 2))
+
+                # update our list of bounding box coordinates,
+                # confidences, and class IDs
+                boxes.append([x, y, int(width), int(height)])
+                confidences.append(float(confidence))
+                classIDs.append(classID)
+    return boxes, confidences, classIDs
+
 def yolo_multitracker(args):
     # load the COCO class labels our YOLO model was trained on
-    labelsPath = os.path.sep.join([args["yolo"], "coco.names"])
+    # labelsPath = os.path.sep.join([args["yolo"], "coco.names"])
     # LABELS = open(labelsPath).read().strip().split("\n")
 
     # initialize a list of colors to represent each possible class label
-    np.random.seed(42)
+    # np.random.seed(42)
     # COLORS = np.random.randint(0, 255, size=(len(LABELS), 3),
     #                            dtype="uint8")
 
@@ -27,23 +78,23 @@ def yolo_multitracker(args):
 
     # initialize the video stream, pointer to output video file, and
     # frame dimensions
-    vs = cv2.VideoCapture(args["video"])
+    # vs = cv2.VideoCapture(args["video"])
     # writer = None
     (W, H) = (None, None)
 
     # try to determine the total number of frames in the video file
-    try:
-        prop = cv2.cv.CV_CAP_PROP_FRAME_COUNT if imutils.is_cv2() \
-            else cv2.CAP_PROP_FRAME_COUNT
-        total = int(vs.get(prop))
-        print("[INFO] {} total frames in video".format(total))
-
-    # an error occurred while trying to determine the total
-    # number of frames in the video file
-    except:
-        print("[INFO] could not determine # of frames in video")
-        print("[INFO] no approx. completion time can be provided")
-        total = -1
+    # try:
+    #     prop = cv2.cv.CV_CAP_PROP_FRAME_COUNT if imutils.is_cv2() \
+    #         else cv2.CAP_PROP_FRAME_COUNT
+    #     total = int(vs.get(prop))
+    #     print("[INFO] {} total frames in video".format(total))
+    #
+    # # an error occurred while trying to determine the total
+    # # number of frames in the video file
+    # except:
+    #     print("[INFO] could not determine # of frames in video")
+    #     print("[INFO] no approx. completion time can be provided")
+    #     total = -1
 
     # initialize a dictionary that maps strings to their corresponding
     # OpenCV object tracker implementations
@@ -104,59 +155,11 @@ def yolo_multitracker(args):
             new_trackers = cv2.MultiTracker_create()
             if W is None or H is None:
                 (H, W) = frame.shape[:2]
-
-            # construct a blob from the input frame and then perform a forward
-            # pass of the YOLO object detector, giving us our bounding boxes
-            # and associated probabilities
-            blob = cv2.dnn.blobFromImage(frame, 1 / 255.0, (416, 416),
-                                         swapRB=True, crop=False)
-            net.setInput(blob)
-            # start = time.time()
-            layerOutputs = net.forward(ln)
-            # end = time.time()
-
-            # initialize our lists of detected bounding boxes, confidences,
-            # and class IDs, respectively
-            boxes = []
-            confidences = []
-            classIDs = []
-
-            # loop over each of the layer outputs
-            for output in layerOutputs:
-                # loop over each of the detections
-                for detection in output:
-                    # extract the class ID and confidence (i.e., probability)
-                    # of the current object detection
-                    scores = detection[5:]
-                    classID = np.argmax(scores)
-                    confidence = scores[classID]
-
-                    # filter out weak predictions by ensuring the detected
-                    # probability is greater than the minimum probability
-                    if confidence > args["confidence"]:
-                        # scale the bounding box coordinates back relative to
-                        # the size of the image, keeping in mind that YOLO
-                        # actually returns the center (x, y)-coordinates of
-                        # the bounding box followed by the boxes' width and
-                        # height
-                        box = detection[0:4] * np.array([W, H, W, H])
-                        (centerX, centerY, width, height) = box.astype("int")
-
-                        # use the center (x, y)-coordinates to derive the top
-                        # and and left corner of the bounding box
-                        x = int(centerX - (width / 2))
-                        y = int(centerY - (height / 2))
-
-                        # update our list of bounding box coordinates,
-                        # confidences, and class IDs
-                        boxes.append([x, y, int(width), int(height)])
-                        confidences.append(float(confidence))
-                        classIDs.append(classID)
+            (boxes, confidences, classIDs)=yolo_detection(frame, W, H, net, ln, args)
             # apply non-maxima suppression to suppress weak, overlapping
             # bounding boxes
             idxs = cv2.dnn.NMSBoxes(boxes, confidences, args["confidence"],
                                     args["threshold"])
-
             if len(idxs) > 0:
                 for j in idxs.flatten():
                     (x, y) = (boxes[j][0], boxes[j][1])
